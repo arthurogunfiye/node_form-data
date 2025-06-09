@@ -1,51 +1,78 @@
 'use strict';
-
 const http = require('http');
 const fs = require('fs');
-const path = require('path');
+const querystring = require('querystring');
 
 function createServer() {
-  const server = new http.Server();
+  const server = http.createServer(async (req, res) => {
+    if (req.url === '/') {
+      if (req.method === 'GET') {
+        res.setHeader('Content-type', 'text/html');
+        const file = fs.createReadStream('public/index.html');
 
-  server.on('request', (req, res) => {
-    const url = new URL(req.url, `http://${req.headers.host}`);
+        file
+          .on('error', () => {
+            res.statusCode = 500;
+            res.end('Failed to read index html');
+          })
+          .pipe(res);
 
-    if (url.pathname === '/' && req.method === 'GET') {
-      fs.createReadStream(path.resolve('public', 'index.html')).pipe(res);
+        res.on('close', () => {
+          file.destroy();
+        });
 
+        return;
+      }
+
+      res.statusCode = 405;
+      res.end('Method not allowed');
       return;
     }
 
-    if (url.pathname === '/add-expense' && req.method === 'POST') {
+    if (req.url === '/add-expense') {
+      if (req.method !== 'POST') {
+        res.statusCode = 405;
+        res.end('Method not allowed!');
+        return;
+      }
       const chunks = [];
 
-      req.on('data', (chunk) => {
+      for await (const chunk of req) {
         chunks.push(chunk);
+      }
+
+      const rawData = Buffer.concat(chunks).toString();
+      let data;
+
+      if (req.headers['content-type'] === 'application/json') {
+        data = JSON.parse(rawData);
+      } else {
+        data = querystring.parse(rawData);
+      }
+
+      const jsonData = JSON.stringify(data);
+      const { title, amount, date } = data;
+
+      if (!title || !amount || !date) {
+        res.statusCode = 404;
+        res.end('Not valid form!');
+        return;
+      }
+
+      fs.writeFileSync('db/expense.json', jsonData, () => {
+        res.statusCode = 500;
+        res.end('Failed to write expense.json');
+        return;
       });
 
-      req.on('end', () => {
-        const expensePath = path.resolve(__dirname, '..', 'db/expense.json');
-        const data = Buffer.concat(chunks).toString();
-
-        if (Object.keys(JSON.parse(data)).length !== 3) {
-          res.statusCode = 400;
-          res.setHeader('Content-type', 'text/plain');
-          res.end('All params must be completed');
-
-          return;
-        }
-
-        fs.writeFile(expensePath, data);
-        res.statusCode = 200;
-        res.setHeader('Content-type', 'application/json');
-        res.end(data);
-      });
-
+      res.setHeader('Content-type', 'application/json');
+      res.end(jsonData);
       return;
     }
 
     res.statusCode = 404;
-    res.end('Page not found');
+    res.end('Not found');
+    return;
   });
 
   return server;
