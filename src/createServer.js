@@ -35,7 +35,7 @@ function createServer() {
           return;
         }
 
-        fs.writeFileSync(expensePath, data);
+        fs.writeFile(expensePath, data);
         res.statusCode = 200;
         res.setHeader('Content-type', 'application/json');
         res.end(data);
